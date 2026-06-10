@@ -1,15 +1,21 @@
 import os
 import csv
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 
 app = Flask(__name__, template_folder='templates')
+
+# --- PROTECTION & AUTH CONFIGURATION ---
+# Flask requires a secret key to securely encrypt user session cookies
+app.secret_key = "TELEMETRY_SESSION_ENCRYPTION_SALT_123" 
+
+AUTH_USER = "RDP"
+AUTH_PASS = "SJI"
 
 # --- LONG-TERM FILE SETTINGS ---
 ARCHIVE_FILE = "telemetry_archive.csv"
 
-# --- GLOBAL LIVE MEMORY STORAGE (Holds list of data points for the last 2 hours) ---
-# Format: [{"timestamp": datetime_obj, "metrics": {...}}, ...]
+# --- GLOBAL LIVE MEMORY STORAGE (2-Hour Data Buffer) ---
 live_buffer = []
 
 # ========================================================
@@ -62,18 +68,13 @@ def parse_telemetry(plaintext):
 # ========================================================
 def append_to_csv_archive(metrics):
     file_exists = os.path.isfile(ARCHIVE_FILE)
-    
-    # Define your standard Excel column headers
     fieldnames = ['Server_Timestamp', 'Transmitter_Time', 'Air_Temp_Humidity', 'Rain', 'TDS', 'Turb', 'LNK', 'PNG', 'Radio', 'SD', 'DHT', 'TURB']
     
     with open(ARCHIVE_FILE, mode='a', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
-        
-        # If the server just restarted or file is brand new, write Excel headers first
         if not file_exists:
             writer.writeheader()
             
-        # Map incoming data tokens smoothly to table slots
         writer.writerow({
             'Server_Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'Transmitter_Time': metrics.get('Time', '---'),
@@ -90,15 +91,32 @@ def append_to_csv_archive(metrics):
         })
 
 # ========================================================
-# 🌐 WEB ROUTES
+# 🌐 WEB ACCESS CONTROLLER ROUTES
 # ========================================================
 
-# 1. Frontend Dashboard Interface
+# 1. Login Logic Screen Routing
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        user_input = request.form.get('username')
+        pass_input = request.form.get('password')
+        
+        if user_input == AUTH_USER and pass_input == AUTH_PASS:
+            session['authenticated'] = True
+            return redirect(url_for('home'))
+        else:
+            return render_template('login.html', error="Invalid User or Passcode combinations.")
+            
+    return render_template('login.html', error=None)
+
+# 2. Frontend Dashboard Interface Route (Protected by Session checks)
 @app.route('/', methods=['GET'])
 def home():
+    if not session.get('authenticated'):
+        return redirect(url_for('login'))
     return render_template('index.html')
 
-# 2. ESP32 Ingestion Pipeline (Processes entries, appends to CSV, cleans old live cache)
+# 3. ESP32 Ingestion Point (Always Open, no cookie check so FireBeetle can POST data)
 @app.route('/', methods=['POST'])
 def receive_telemetry():
     global live_buffer
@@ -107,49 +125,40 @@ def receive_telemetry():
     if not raw_payload:
         return jsonify({"status": "error", "message": "Empty payload"}), 400
         
-    # Decrypt and parse incoming packet
     decrypted_str = rc4_decrypt(raw_payload)
     metrics = parse_telemetry(decrypted_str)
     
     now = datetime.now()
-    
-    # A. Commit directly to permanent Excel/CSV archive array
     try:
         append_to_csv_archive(metrics)
     except Exception as e:
-        print(f"[ARCHIVE ERROR]: Failed to write log entries: {e}")
+        print(f"[ARCHIVE ERROR]: {e}")
 
-    # B. Add packet to the temporary live dashboard list
-    live_buffer.append({
-        "timestamp": now,
-        "metrics": metrics
-    })
+    live_buffer.append({"timestamp": now, "metrics": metrics})
     
-    # C. AUTOMATIC WIPE: Remove data elements older than exactly 2 hours
     two_hours_ago = now - timedelta(hours=2)
     live_buffer = [packet for packet in live_buffer if packet["timestamp"] > two_hours_ago]
     
     return jsonify({"status": "success", "processed": True}), 200
 
-# 3. Frontend Live Data API Hook (Returns only the latest valid packet from cache)
+# 4. Frontend Live Data API Hook (Protected by Session checks)
 @app.route('/api/live', methods=['GET'])
 def get_live_data():
+    if not session.get('authenticated'):
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+        
     if len(live_buffer) > 0:
-        # Grab the newest packet sitting at the end of our 2-hour queue
         latest_packet = live_buffer[-1]
-        return jsonify({
-            "status": "nominal",
-            "metrics": latest_packet["metrics"]
-        }), 200
+        return jsonify({"status": "nominal", "metrics": latest_packet["metrics"]}), 200
     else:
-        return jsonify({
-            "status": "waiting_for_data",
-            "metrics": {}
-        }), 200
+        return jsonify({"status": "waiting_for_data", "metrics": {}}), 200
 
-# 4. Hidden Download Route (Allows you to pull down your backup Excel file anytime)
+# 5. Backup Download Route (Protected by Session checks)
 @app.route('/download/archive', methods=['GET'])
 def download_archive():
+    if not session.get('authenticated'):
+        return redirect(url_for('login'))
+        
     if os.path.isfile(ARCHIVE_FILE):
         from flask import send_file
         return send_file(ARCHIVE_FILE, as_attachment=True)
