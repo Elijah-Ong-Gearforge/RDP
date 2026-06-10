@@ -1,7 +1,16 @@
 import os
-from flask import Flask, request, jsonify
+import csv
+from datetime import datetime, timedelta
+from flask import Flask, request, jsonify, render_template
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates')
+
+# --- LONG-TERM FILE SETTINGS ---
+ARCHIVE_FILE = "telemetry_archive.csv"
+
+# --- GLOBAL LIVE MEMORY STORAGE (Holds list of data points for the last 2 hours) ---
+# Format: [{"timestamp": datetime_obj, "metrics": {...}}, ...]
+live_buffer = []
 
 # ========================================================
 # 🔐 CRYPTOGRAPHY ENGINE (Python RC4 Translation)
@@ -10,19 +19,16 @@ CRYPTO_KEY = b"MegaTelemetry123"
 
 def rc4_decrypt(hex_string):
     try:
-        # Convert hex string back to raw bytes
         data = bytearray.fromhex(hex_string)
         data_len = len(data)
         key_len = len(CRYPTO_KEY)
         
-        # Key Scheduling Algorithm (KSA)
         S = list(range(256))
         j = 0
         for i in range(256):
             j = (j + S[i] + CRYPTO_KEY[i % key_len]) % 256
             S[i], S[j] = S[j], S[i]
             
-        # Pseudo-Random Generation Algorithm (PRGA) & XOR
         i = 0
         j = 0
         decrypted_bytes = bytearray(data_len)
@@ -32,7 +38,6 @@ def rc4_decrypt(hex_string):
             S[i], S[j] = S[j], S[i]
             decrypted_bytes[k] = data[k] ^ S[(S[i] + S[j]) % 256]
             
-        # Decode binary data to UTF-8 plaintext string
         return decrypted_bytes.decode('utf-8', errors='ignore')
     except Exception as e:
         return f"DECRYPTION_ERROR: {str(e)}"
@@ -41,10 +46,7 @@ def rc4_decrypt(hex_string):
 # 🔍 TELEMETRY DATA PARSER
 # ========================================================
 def parse_telemetry(plaintext):
-    # Example format: "Air:23.5,55.0|TDS:120,1.2|Turb:400,2.1|Rain:950|LNK:98|PNG:12"
     parsed_data = {}
-    
-    # Split the main tokens
     tokens = plaintext.split('|')
     for token in tokens:
         if ':' in token:
@@ -53,54 +55,106 @@ def parse_telemetry(plaintext):
         elif '=' in token:
             key, val = token.split('=', 1)
             parsed_data[key.strip()] = val.strip()
-            
     return parsed_data
+
+# ========================================================
+# 📂 BACKEND CSV ARCHIVER
+# ========================================================
+def append_to_csv_archive(metrics):
+    file_exists = os.path.isfile(ARCHIVE_FILE)
+    
+    # Define your standard Excel column headers
+    fieldnames = ['Server_Timestamp', 'Transmitter_Time', 'Air_Temp_Humidity', 'Rain', 'TDS', 'Turb', 'LNK', 'PNG', 'Radio', 'SD', 'DHT', 'TURB']
+    
+    with open(ARCHIVE_FILE, mode='a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        
+        # If the server just restarted or file is brand new, write Excel headers first
+        if not file_exists:
+            writer.writeheader()
+            
+        # Map incoming data tokens smoothly to table slots
+        writer.writerow({
+            'Server_Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'Transmitter_Time': metrics.get('Time', '---'),
+            'Air_Temp_Humidity': metrics.get('Air', '---'),
+            'Rain': metrics.get('Rain', '---'),
+            'TDS': metrics.get('TDS', '---'),
+            'Turb': metrics.get('Turb', '---'),
+            'LNK': metrics.get('LNK', '---'),
+            'PNG': metrics.get('PNG', '---'),
+            'Radio': metrics.get('Radio', '---'),
+            'SD': metrics.get('SD', '---'),
+            'DHT': metrics.get('DHT', '---'),
+            'TURB': metrics.get('TURB', '---')
+        })
 
 # ========================================================
 # 🌐 WEB ROUTES
 # ========================================================
 
-# 1. Root Dashboard (To verify your server is online via a browser)
+# 1. Frontend Dashboard Interface
 @app.route('/', methods=['GET'])
 def home():
-    return """
-    <html>
-        <head><title>Telemetry Cloud Hub</title></head>
-        <body style="font-family:sans-serif; text-align:center; padding-top:50px;">
-            <h1>🌐 Telemetry Cloud Server Online</h1>
-            <p>Ready to receive streaming sensor packets from your ESP32 Gateway.</p>
-        </body>
-    </html>
-    """
+    return render_template('index.html')
 
-# 2. ESP32 Dynamic Ingestion Endpoint
+# 2. ESP32 Ingestion Pipeline (Processes entries, appends to CSV, cleans old live cache)
 @app.route('/', methods=['POST'])
 def receive_telemetry():
-    # Capture incoming raw data string
+    global live_buffer
     raw_payload = request.data.decode('utf-8').strip()
     
     if not raw_payload:
-        return jsonify({"status": "error", "message": "Empty payload received"}), 400
+        return jsonify({"status": "error", "message": "Empty payload"}), 400
         
-    print(f"\n[RAW INCOMING CRYPTO]: {raw_payload}")
-    
-    # Decrypt payload using RC4
+    # Decrypt and parse incoming packet
     decrypted_str = rc4_decrypt(raw_payload)
-    print(f"[LIVE DECRYPTED STRING]: {decrypted_str}")
-    
-    # Parse human-readable values out of the payload
     metrics = parse_telemetry(decrypted_str)
-    print(f"[PARSED METRICS]: {metrics}")
     
-    # Success acknowledgement return back to ESP32
-    return jsonify({
-        "status": "success",
-        "processed": True,
-        "payload_length": len(raw_payload),
-        "data": metrics
-    }), 200
+    now = datetime.now()
+    
+    # A. Commit directly to permanent Excel/CSV archive array
+    try:
+        append_to_csv_archive(metrics)
+    except Exception as e:
+        print(f"[ARCHIVE ERROR]: Failed to write log entries: {e}")
+
+    # B. Add packet to the temporary live dashboard list
+    live_buffer.append({
+        "timestamp": now,
+        "metrics": metrics
+    })
+    
+    # C. AUTOMATIC WIPE: Remove data elements older than exactly 2 hours
+    two_hours_ago = now - timedelta(hours=2)
+    live_buffer = [packet for packet in live_buffer if packet["timestamp"] > two_hours_ago]
+    
+    return jsonify({"status": "success", "processed": True}), 200
+
+# 3. Frontend Live Data API Hook (Returns only the latest valid packet from cache)
+@app.route('/api/live', methods=['GET'])
+def get_live_data():
+    if len(live_buffer) > 0:
+        # Grab the newest packet sitting at the end of our 2-hour queue
+        latest_packet = live_buffer[-1]
+        return jsonify({
+            "status": "nominal",
+            "metrics": latest_packet["metrics"]
+        }), 200
+    else:
+        return jsonify({
+            "status": "waiting_for_data",
+            "metrics": {}
+        }), 200
+
+# 4. Hidden Download Route (Allows you to pull down your backup Excel file anytime)
+@app.route('/download/archive', methods=['GET'])
+def download_archive():
+    if os.path.isfile(ARCHIVE_FILE):
+        from flask import send_file
+        return send_file(ARCHIVE_FILE, as_attachment=True)
+    return "No archive history available yet.", 404
 
 if __name__ == '__main__':
-    # Grab Render's dynamic production port, fallback to 5000 locally
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
