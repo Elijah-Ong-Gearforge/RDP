@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telemetry Hub Access Control</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --accent-blue: #38bdf8;
+            --accent-red: #f87171;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .login-box {
+            background-color: var(--card-bg);
+            padding: 30px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 360px;
+            text-align: center;
+        }
+        h2 { margin-bottom: 20px; color: var(--accent-blue); font-size: 1.5rem; }
+        .input-group { margin-bottom: 15px; text-align: left; }
+        label { display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px; }
+        input {
+            width: 100%;
+            padding: 10px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            color: white;
+            box-sizing: border-box;
+            font-size: 1rem;
+        }
+        input:focus { outline: 1px solid var(--accent-blue); }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent-blue);
+            border: none;
+            border-radius: 6px;
+            color: #0f172a;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover { background: #7dd3fc; }
+        .error-msg { color: var(--accent-red); font-size: 0.85rem; margin-top: 15px; display: block; }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h2>🔒 Restricted Gateway</h2>
+        <p style="color: #94a3b8; font-size: 0.9rem; margin-top: -10px; margin-bottom: 20px;">Authorized Access Only</p>
+        
+        <form action="/login" method="POST">
+            <div class="input-group">
+                <label>User ID</label>
+                <input type="text" name="username" placeholder="Enter User" required autocomplete="off">
+            </div>
+            <div class="input-group">
+                <label>Secure Passcode</label>
+                <input type="password" name="password" placeholder="Enter Passcode" required>
+            </div>
+            <button type="submit">Unlock Console</button>
+        </form>
+
+        {% if error %}
+        <span class="error-msg">⚠️ {{ error }}</span>
+        {% endif %}
+    </div>
+</body>
+</html>
