@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telemetry Cloud Hub</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-blue: #38bdf8;
+            --accent-green: #4ade80;
+            --accent-red: #f87171;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+        h1 { margin: 0; font-size: 1.8rem; color: var(--accent-blue); }
+        .timestamp { color: var(--text-muted); font-size: 0.9rem; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            border: 1px solid #334155;
+        }
+        .card-title {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 10px;
+        }
+        .card-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .card-sub {
+            font-size: 0.8rem;
+            color: var(--accent-blue);
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+        .status-active { background: rgba(74,222,128,0.1); color: var(--accent-green); }
+        .status-discon { background: rgba(248,113,113,0.1); color: var(--accent-red); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>🌐 Telemetry Cloud Hub</h1>
+                <p style="color: var(--text-muted); margin: 5px 0 0 0;">Live Receiver Passthrough Stream</p>
+            </div>
+            <div class="timestamp">Last Server Sync: <span id="sync-time">Never</span></div>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">Air Temperature</div>
+                <div class="card-value" id="val-temp">--.-°C</div>
+                <div class="card-sub" id="status-dht">DHT: UNKNOWN</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Humidity</div>
+                <div class="card-value" id="val-hum">--.-%</div>
+                <div class="card-sub">Atmospheric</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Water TDS</div>
+                <div class="card-value" id="val-tds">--- ppm</div>
+                <div class="card-sub" id="val-tds-v">Volt: ---V</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Turbidity</div>
+                <div class="card-value" id="val-turb">--- NTU</div>
+                <div class="card-sub" id="val-turb-v">Volt: ---V</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Rain Status</div>
+                <div class="card-value" id="val-rain">---</div>
+                <div class="card-sub" id="status-rain">Sensor: UNKNOWN</div>
+            </div>
+        </div>
+
+        <h2>System Link Status</h2>
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">Radio Status</div>
+                <div id="badge-radio" class="status-badge status-discon">INACTIVE</div>
+                <p class="timestamp" style="margin-top:10px;">LQ: <span id="val-lq">--</span>% | Ping: <span id="val-png">--</span>ms</p>
+            </div>
+            <div class="card">
+                <div class="card-title">Receiver SD Card</div>
+                <div id="badge-sd" class="status-badge status-discon">INACTIVE</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Timestamp</div>
+                <div class="card-value" id="val-time" style="font-size: 1.5rem;">00:00:00</div>
+                <div class="card-sub">Transmitter Local Clock</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function fetchLatestTelemetry() {
+            try {
+                const response = await fetch('/api/live');
+                const data = await response.json();
+                
+                if (data.status === "nominal" && data.metrics) {
+                    const m = data.metrics;
+                    
+                    document.getElementById('val-temp').innerText = m.Air ? m.Air.split(',')[0] + '°C' : '--.-°C';
+                    document.getElementById('val-hum').innerText = m.Air ? m.Air.split(',')[1] + '%' : '--.-%';
+                    
+                    if (m.TDS) {
+                        const tdsParts = m.TDS.split(',');
+                        document.getElementById('val-tds').innerText = tdsParts[0] + ' ppm';
+                        document.getElementById('val-tds-v').innerText = 'Volt: ' + (tdsParts[1] || '---') + 'V';
+                    }
+                    
+                    if (m.Turb) {
+                        const turbParts = m.Turb.split(',');
+                        document.getElementById('val-turb').innerText = turbParts[0] + ' NTU';
+                        document.getElementById('val-turb-v').innerText = 'Volt: ' + (turbParts[1] || '---') + 'V';
+                    }
+
+                    document.getElementById('val-time').innerText = m.Time || '00:00:00';
+                    document.getElementById('val-lq').innerText = m.LNK || '--';
+                    document.getElementById('val-png').innerText = m.PNG || '--';
+                    
+                    if (m.Rain) {
+                        let rVal = parseInt(m.Rain);
+                        if (rVal > 900) document.getElementById('val-rain').innerText = "Dry";
+                        else if (rVal > 400) document.getElementById('val-rain').innerText = "Rain";
+                        else document.getElementById('val-rain').innerText = "HEAVY";
+                    }
+
+                    updateHardwareSubtext('status-dht', 'DHT Hardware: ', m.DHT);
+                    updateHardwareSubtext('status-rain', 'Rain Status: ', m.RAIN || (m.Rain ? "ACTIVE" : "DISCON"));
+                    
+                    updateStatusBadge('badge-radio', m.Radio);
+                    updateStatusBadge('badge-sd', m.SD);
+
+                    document.getElementById('sync-time').innerText = new Date().toLocaleTimeString();
+                }
+            } catch (err) {
+                console.error("Dashboard error tracking live feed metrics:", err);
+            }
+        }
+
+        function updateHardwareSubtext(id, prefix, state) {
+            const el = document.getElementById(id);
+            if (!state) return;
+            el.innerText = prefix + state;
+            el.style.color = state === "ACTIVE" ? "var(--accent-green)" : "var(--accent-red)";
+        }
+
+        function updateStatusBadge(id, state) {
+            const el = document.getElementById(id);
+            if (!state) return;
+            el.innerText = state;
+            if (state === "ACTIVE") {
+                el.className = "status-badge status-active";
+            } else {
+                el.className = "status-badge status-discon";
+            }
+        }
+
+        setInterval(fetchLatestTelemetry, 2000);
+        fetchLatestTelemetry();
+    </script>
+</body>
+</html>
