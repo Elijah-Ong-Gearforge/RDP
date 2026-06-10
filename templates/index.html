@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Telemetry Cloud Hub</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -34,9 +35,9 @@
             margin-bottom: 30px;
         }
         h1 { margin: 0; font-size: 1.8rem; color: var(--accent-blue); }
+        h2 { font-size: 1.4rem; color: var(--text-main); margin-top: 40px; margin-bottom: 20px; border-left: 4px solid var(--accent-blue); padding-left: 10px;}
         .timestamp { color: var(--text-muted); font-size: 0.9rem; text-align: right; }
         
-        /* NEW DOWNLOAD BUTTON STYLE */
         .btn-download {
             display: inline-block;
             margin-top: 8px;
@@ -60,6 +61,15 @@
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
+        }
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        @media (max-width: 500px) {
+            .chart-grid { grid-template-columns: 1fr; }
         }
         .card {
             background-color: var(--card-bg);
@@ -126,7 +136,7 @@
             </div>
             <div class="card">
                 <div class="card-title">Turbidity</div>
-                <div class="card-value" id="val-turb">--- NTU</div>
+                <div class="card-value" id="val-turb">--- ppm</div>
                 <div class="card-sub" id="val-turb-v">Volt: ---V</div>
             </div>
             <div class="card">
@@ -144,7 +154,7 @@
                 <p class="timestamp" style="margin-top:10px; text-align: left;">LQ: <span id="val-lq">--</span>% | Ping: <span id="val-png">--</span>ms</p>
             </div>
             <div class="card">
-                <div class="card-title">Receiver SD Card</div>
+                <div class="card-title">Transmitter SD Card</div>
                 <div id="badge-sd" class="status-badge status-discon">INACTIVE</div>
             </div>
             <div class="card">
@@ -153,14 +163,86 @@
                 <div class="card-sub">Transmitter Local Clock</div>
             </div>
         </div>
+
+        <h2>Real-Time Historical Trends</h2>
+        <div class="chart-grid">
+            <div class="card">
+                <div class="card-title">Atmospheric Timeline</div>
+                <canvas id="chart-climate" height="200"></canvas>
+            </div>
+            <div class="card">
+                <div class="card-title">Water Quality Timeline</div>
+                <canvas id="chart-water" height="200"></canvas>
+            </div>
+        </div>
     </div>
 
     <script>
+        // Global variables to hold chart objects and limits
+        let climateChart, waterChart;
+        const MAX_DATA_POINTS = 15;
+
+        // Initialize Charts on Dom Load
+        function initCharts() {
+            const ctxClimate = document.getElementById('chart-climate').getContext('2d');
+            climateChart = new Chart(ctxClimate, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'Temp (°C)', data: [], borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.1)', tension: 0.2, yAxisID: 'y-temp' },
+                        { label: 'Humidity (%)', data: [], borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.1)', tension: 0.2, yAxisID: 'y-hum' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+                        'y-temp': { type: 'linear', position: 'left', grid: { color: '#334155' }, ticks: { color: '#38bdf8' } },
+                        'y-hum': { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#a78bfa' } }
+                    },
+                    plugins: { legend: { labels: { color: '#f8fafc' } } }
+                }
+            });
+
+            const ctxWater = document.getElementById('chart-water').getContext('2d');
+            waterChart = new Chart(ctxWater, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'TDS (ppm)', data: [], borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.1)', tension: 0.2 },
+                        { label: 'Turbidity (ppm)', data: [], borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,0.1)', tension: 0.2 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+                        y: { grid: { color: '#334155' }, ticks: { color: '#f8fafc' } }
+                    },
+                    plugins: { legend: { labels: { color: '#f8fafc' } } }
+                }
+            });
+        }
+
+        function updateChartData(chart, label, newVal1, newVal2) {
+            chart.data.labels.push(label);
+            chart.data.datasets[0].data.push(newVal1);
+            if (newVal2 !== undefined) chart.data.datasets[1].data.push(newVal2);
+
+            if (chart.data.labels.length > MAX_DATA_POINTS) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+                if (newVal2 !== undefined) chart.data.datasets[1].data.shift();
+            }
+            chart.update('none'); // Update smoothly without full reset animations
+        }
+
         async function fetchLatestTelemetry() {
             try {
                 const response = await fetch('/api/live');
                 
-                // If user loses authorization credentials, kick back to login layout
                 if (response.status === 401) {
                     window.location.href = '/login';
                     return;
@@ -171,22 +253,33 @@
                 if (data.status === "nominal" && data.metrics) {
                     const m = data.metrics;
                     
-                    document.getElementById('val-temp').innerText = m.Air ? m.Air.split(',')[0] + '°C' : '--.-°C';
-                    document.getElementById('val-hum').innerText = m.Air ? m.Air.split(',')[1] + '%' : '--.-%';
+                    let currentTemp = null, currentHum = null, currentTds = null, currentTurb = null;
+
+                    if (m.Air) {
+                        const airParts = m.Air.split(',');
+                        currentTemp = parseFloat(airParts[0]);
+                        currentHum = parseFloat(airParts[1]);
+                        document.getElementById('val-temp').innerText = airParts[0] + '°C';
+                        document.getElementById('val-hum').innerText = airParts[1] + '%';
+                    }
                     
                     if (m.TDS) {
                         const tdsParts = m.TDS.split(',');
+                        currentTds = parseFloat(tdsParts[0]);
                         document.getElementById('val-tds').innerText = tdsParts[0] + ' ppm';
                         document.getElementById('val-tds-v').innerText = 'Volt: ' + (tdsParts[1] || '---') + 'V';
                     }
                     
                     if (m.Turb) {
                         const turbParts = m.Turb.split(',');
-                        document.getElementById('val-turb').innerText = turbParts[0] + ' NTU';
+                        currentTurb = parseFloat(turbParts[0]);
+                        // FIX: Unit label corrected to ppm
+                        document.getElementById('val-turb').innerText = turbParts[0] + ' ppm';
                         document.getElementById('val-turb-v').innerText = 'Volt: ' + (turbParts[1] || '---') + 'V';
                     }
 
-                    document.getElementById('val-time').innerText = m.Time || '00:00:00';
+                    const currentTime = m.Time || new Date().toLocaleTimeString();
+                    document.getElementById('val-time').innerText = currentTime;
                     document.getElementById('val-lq').innerText = m.LNK || '--';
                     document.getElementById('val-png').innerText = m.PNG || '--';
                     
@@ -204,6 +297,14 @@
                     updateStatusBadge('badge-sd', m.SD);
 
                     document.getElementById('sync-time').innerText = new Date().toLocaleTimeString();
+
+                    // Update visual graph paths
+                    if (currentTemp !== null && !isNaN(currentTemp)) {
+                        updateChartData(climateChart, currentTime, currentTemp, currentHum);
+                    }
+                    if (currentTds !== null && !isNaN(currentTds)) {
+                        updateChartData(waterChart, currentTime, currentTds, currentTurb);
+                    }
                 }
             } catch (err) {
                 console.error("Dashboard error tracking live feed metrics:", err);
@@ -228,6 +329,8 @@
             }
         }
 
+        // Initialize structures
+        initCharts();
         setInterval(fetchLatestTelemetry, 2000);
         fetchLatestTelemetry();
     </script>
