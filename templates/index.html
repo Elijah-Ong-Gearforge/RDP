@@ -34,7 +34,27 @@
             margin-bottom: 30px;
         }
         h1 { margin: 0; font-size: 1.8rem; color: var(--accent-blue); }
-        .timestamp { color: var(--text-muted); font-size: 0.9rem; }
+        .timestamp { color: var(--text-muted); font-size: 0.9rem; text-align: right; }
+        
+        /* NEW DOWNLOAD BUTTON STYLE */
+        .btn-download {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 6px 14px;
+            background-color: transparent;
+            border: 1px solid var(--accent-blue);
+            color: var(--accent-blue);
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: bold;
+            transition: all 0.2s ease;
+        }
+        .btn-download:hover {
+            background-color: var(--accent-blue);
+            color: #0f172a;
+        }
+
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -82,7 +102,10 @@
                 <h1>🌐 Telemetry Cloud Hub</h1>
                 <p style="color: var(--text-muted); margin: 5px 0 0 0;">Live Receiver Passthrough Stream</p>
             </div>
-            <div class="timestamp">Last Server Sync: <span id="sync-time">Never</span></div>
+            <div class="timestamp">
+                <div>Last Server Sync: <span id="sync-time">Never</span></div>
+                <a href="/download/archive" class="btn-download" target="_blank">📥 Download Excel Archive (.CSV)</a>
+            </div>
         </header>
 
         <div class="grid">
@@ -118,7 +141,7 @@
             <div class="card">
                 <div class="card-title">Radio Status</div>
                 <div id="badge-radio" class="status-badge status-discon">INACTIVE</div>
-                <p class="timestamp" style="margin-top:10px;">LQ: <span id="val-lq">--</span>% | Ping: <span id="val-png">--</span>ms</p>
+                <p class="timestamp" style="margin-top:10px; text-align: left;">LQ: <span id="val-lq">--</span>% | Ping: <span id="val-png">--</span>ms</p>
             </div>
             <div class="card">
                 <div class="card-title">Receiver SD Card</div>
@@ -136,6 +159,13 @@
         async function fetchLatestTelemetry() {
             try {
                 const response = await fetch('/api/live');
+                
+                // If user loses authorization credentials, kick back to login layout
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+                
                 const data = await response.json();
                 
                 if (data.status === "nominal" && data.metrics) {
