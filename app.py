@@ -18,37 +18,7 @@ ARCHIVE_FILE = "telemetry_archive.csv"
 live_buffer = []
 
 # ========================================================
-# 🔐 CRYPTOGRAPHY ENGINE (Python RC4 Translation)
-# ========================================================
-CRYPTO_KEY = b"MegaTelemetry123"
-
-def rc4_decrypt(hex_string):
-    try:
-        data = bytearray.fromhex(hex_string)
-        data_len = len(data)
-        key_len = len(CRYPTO_KEY)
-        
-        S = list(range(256))
-        j = 0
-        for i in range(256):
-            j = (j + S[i] + CRYPTO_KEY[i % key_len]) % 256
-            S[i], S[j] = S[j], S[i]
-            
-        i = 0
-        j = 0
-        decrypted_bytes = bytearray(data_len)
-        for k in range(data_len):
-            i = (i + 1) % 256
-            j = (j + S[i]) % 256
-            S[i], S[j] = S[j], S[i]
-            decrypted_bytes[k] = data[k] ^ S[(S[i] + S[j]) % 256]
-            
-        return decrypted_bytes.decode('utf-8', errors='ignore')
-    except Exception as e:
-        return f"DECRYPTION_ERROR: {str(e)}"
-
-# ========================================================
-# 🔍 TELEMETRY DATA PARSER
+# 📊 TELEMETRY DATA PARSER
 # ========================================================
 def parse_telemetry(plaintext):
     parsed_data = {}
@@ -67,8 +37,7 @@ def parse_telemetry(plaintext):
 # ========================================================
 def append_to_csv_archive(metrics):
     file_exists = os.path.isfile(ARCHIVE_FILE)
-    # Added ESP_VCC to the headers
-    fieldnames = ['Server_Timestamp', 'Transmitter_Time', 'Air_Temp_Humidity', 'Rain', 'TDS', 'Turb', 'LNK', 'PNG', 'Radio', 'SD', 'DHT', 'TURB', 'ESP_VCC']
+    fieldnames = ['Server_Timestamp', 'Transmitter_Time', 'Air_Temp_Humidity', 'Rain', 'TDS', 'Turb', 'LNK', 'PNG', 'Radio', 'SD', 'DHT', 'TURB']
     
     with open(ARCHIVE_FILE, mode='a', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -87,12 +56,11 @@ def append_to_csv_archive(metrics):
             'Radio': metrics.get('Radio', '---'),
             'SD': metrics.get('SD', '---'),
             'DHT': metrics.get('DHT', '---'),
-            'TURB': metrics.get('TURB', '---'),
-            'ESP_VCC': metrics.get('esp_vcc', '---')
+            'TURB': metrics.get('TURB', '---')
         })
 
 # ========================================================
-# 🌐 WEB ACCESS CONTROLLER ROUTES
+# 🔐 WEB ACCESS CONTROLLER ROUTES
 # ========================================================
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -115,30 +83,18 @@ def home():
         return redirect(url_for('login'))
     return render_template('index.html')
 
-# ESP32 Ingestion Point (Always Open, no cookie check so FireBeetle can POST data)
+# 3. ESP32 Ingestion Point (Accepting direct plaintext payload)
 @app.route('/', methods=['POST'])
 def receive_telemetry():
     global live_buffer
-    
-    # 1. Safely extract JSON data sent by ESP32
-    if request.is_json:
-        json_data = request.get_json()
-        raw_payload = json_data.get('data', '').strip()
-        esp_vcc = json_data.get('esp_vcc', '---')
-    else:
-        # Fallback safeguard in case standard plaintext is transmitted
-        raw_payload = request.data.decode('utf-8').strip()
-        esp_vcc = '---'
+    raw_payload = request.data.decode('utf-8').strip()
     
     if not raw_payload:
         return jsonify({"status": "error", "message": "Empty payload"}), 400
         
-    # 2. Decrypt ONLY the extracted hex string
-    decrypted_str = rc4_decrypt(raw_payload)
-    metrics = parse_telemetry(decrypted_str)
-    
-    # 3. Inject the FireBeetle's voltage into the metrics matrix
-    metrics['esp_vcc'] = str(esp_vcc)
+    # REMOVED: Decryption engine completely bypassed.
+    # The ESP32 is sending raw telemetry strings directly.
+    metrics = parse_telemetry(raw_payload)
     
     now = datetime.now()
     try:
