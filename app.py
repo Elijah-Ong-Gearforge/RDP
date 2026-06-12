@@ -83,17 +83,21 @@ def home():
         return redirect(url_for('login'))
     return render_template('index.html')
 
-# 3. ESP32 Ingestion Point (Accepting direct plaintext payload)
+# 3. ESP32 Ingestion Point (Accepting direct JSON plaintext wrapper)
 @app.route('/', methods=['POST'])
 def receive_telemetry():
     global live_buffer
-    raw_payload = request.data.decode('utf-8').strip()
+    
+    # Check if the incoming request is JSON formatted
+    if request.is_json:
+        json_data = request.get_json()
+        raw_payload = json_data.get('data', '').strip()
+    else:
+        raw_payload = request.data.decode('utf-8').strip()
     
     if not raw_payload:
         return jsonify({"status": "error", "message": "Empty payload"}), 400
         
-    # REMOVED: Decryption engine completely bypassed.
-    # The ESP32 is sending raw telemetry strings directly.
     metrics = parse_telemetry(raw_payload)
     
     now = datetime.now()
